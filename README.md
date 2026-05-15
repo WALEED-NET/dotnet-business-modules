@@ -88,7 +88,7 @@ In every new project, we rewrite the same modules:
 ### 1. 🎯 Easy Installation
 
 ```bash
-dotnet add package BenSumaidea.Modules.Inventory
+dotnet add package MyCompany.Modules.Inventory
 ```
 
 ### 2. 🔌 Simple Integration
@@ -151,7 +151,7 @@ Each module comes with:
 ### Step 1: Install
 
 ```bash
-dotnet add package BenSumaidea.Modules.Inventory
+dotnet add package MyCompany.Modules.Inventory
 ```
 
 ### Step 2: Add to DbContext
