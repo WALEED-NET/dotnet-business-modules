@@ -15,6 +15,9 @@
 - [Quick Start](#-quick-start)
 - [Available Modules](#-available-modules)
 - [Configuration](#-configuration)
+- [Schema Flexibility](#-schema-flexibility) ✨
+- [Multi-Tenancy Strategies](#-multi-tenancy-strategies) ✨
+- [Entity Inheritance](#-entity-inheritance) ✨
 - [Architecture](#-architecture)
 - [Contributing](#-contributing)
 - [Roadmap](#-roadmap)
@@ -339,6 +342,300 @@ services.AddInventoryModule<AppDbContext, Product>();
 
 ---
 
+## 🗄️ Schema Flexibility
+
+> 💡 *Inspired by feedback from **Mustafa Al-Qahoum***
+
+Every project has different database conventions. Our modules adapt to YOUR schema, not the other way around.
+
+### Schema Configuration Strategies
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Strategy 1: Use Defaults (Quick Start)                         │
+│  ═══════════════════════════════════════════════════════════    │
+│  services.AddInventoryModule<AppDbContext>();                   │
+│  Result: [dbo].[StockItems], [dbo].[Warehouses]                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Strategy 2: Custom Schema & Prefix                             │
+│  ═══════════════════════════════════════════════════════════    │
+│  config.Schema = "inventory";                                   │
+│  config.TablePrefix = "Inv_";                                   │
+│  Result: [inventory].[Inv_StockItems]                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Strategy 3: Full Control                                       │
+│  ═══════════════════════════════════════════════════════════    │
+│  config.TableNames.StockItems = "MyCustomStockTable";           │
+│  Result: Complete flexibility!                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Examples
+
+```csharp
+// ═══════════════════════════════════════════════════════════════
+// Option 1: Sensible Defaults
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>();
+
+// ═══════════════════════════════════════════════════════════════
+// Option 2: Custom Schema & Prefix
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>(config =>
+{
+    config.UseSchema("inventory")
+          .WithTablePrefix("Inv_");
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Option 3: Full Table Name Control
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>(config =>
+{
+    config.TableNames = new TableNamesConfig
+    {
+        StockItems = "MyCustomStockTable",
+        Warehouses = "MyWarehouses",
+        StockMovements = "StockHistory"
+    };
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Option 4: Column Aliasing (for existing databases)
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>(config =>
+{
+    config.ColumnMapping = new ColumnMappingOptions
+    {
+        QuantityColumn = "QtyOnHand",        // Instead of "Quantity"
+        ReorderLevelColumn = "MinStock",     // Instead of "ReorderLevel"
+        CreatedAtColumn = "DateCreated",     // Instead of "CreatedAt"
+    };
+});
+```
+
+---
+
+## 🏢 Multi-Tenancy Strategies
+
+> 💡 *Inspired by feedback from **Mustafa Al-Qahoum***
+
+Built-in support for SaaS applications with three isolation strategies:
+
+### Available Strategies
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Strategy 1: Shared Schema (Most Common)                        │
+│  ═══════════════════════════════════════════════════════════    │
+│                                                                 │
+│  Database: MainDB                                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ StockItems                                               │   │
+│  │ Id | TenantId  | ProductId | Quantity                    │   │
+│  │ 1  | tenant-a  | prod-1    | 100                         │   │
+│  │ 2  | tenant-b  | prod-2    | 50                          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│  ✅ Easy | ✅ Cost-effective | ⚠️ Requires Query Filters       │
+├─────────────────────────────────────────────────────────────────┤
+│  Strategy 2: Separate Schema                                    │
+│  ═══════════════════════════════════════════════════════════    │
+│                                                                 │
+│  Database: MainDB                                               │
+│  [tenant_a].[StockItems]  |  [tenant_b].[StockItems]           │
+│  ✅ Better isolation | ⚠️ Complex migrations                    │
+├─────────────────────────────────────────────────────────────────┤
+│  Strategy 3: Separate Database                                  │
+│  ═══════════════════════════════════════════════════════════    │
+│                                                                 │
+│  Database: TenantA_DB     |  Database: TenantB_DB              │
+│  ✅ Complete isolation | ❌ Higher cost                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Examples
+
+```csharp
+// ═══════════════════════════════════════════════════════════════
+// Strategy 1: Shared Schema with TenantId column
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>(config =>
+{
+    config.EnableMultiTenancy(tenant =>
+    {
+        tenant.UseSharedSchema()
+              .WithTenantColumn("TenantId")
+              .ResolveFromHeader("X-Tenant-Id");
+        // Or: .ResolveFromClaim("tenant_id")
+        // Or: .ResolveFromSubdomain()
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Strategy 2: Separate Schema per tenant
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>(config =>
+{
+    config.EnableMultiTenancy(tenant =>
+    {
+        tenant.UseSeparateSchema()
+              .SchemaResolver(t => $"tenant_{t.Id}");
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Strategy 3: Separate Database per tenant
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>(config =>
+{
+    config.EnableMultiTenancy(tenant =>
+    {
+        tenant.UseSeparateDatabase()
+              .ConnectionStringResolver(t => 
+                  $"Server=...;Database=App_{t.Id};...");
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Disabled (Single-tenant - Default)
+// ═══════════════════════════════════════════════════════════════
+services.AddInventoryModule<AppDbContext>();
+// Multi-tenancy is disabled by default
+```
+
+---
+
+## 🧬 Entity Inheritance
+
+> 💡 *Inspired by feedback from **Omar Al-Amoudi***
+
+Extend base entities with your own properties and behavior - no compromises!
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│   Module provides:              You extend:                     │
+│   ┌──────────────────┐          ┌──────────────────────────┐   │
+│   │  StockItemBase   │    →     │  MyStockItem             │   │
+│   │  ─────────────── │          │  : StockItemBase         │   │
+│   │  + Id            │          │  ─────────────────────── │   │
+│   │  + ProductId     │          │  + WarehouseLocation     │   │
+│   │  + Quantity      │          │  + ExpiryDate            │   │
+│   │  + CreatedAt     │          │  + BatchNumber           │   │
+│   │                  │          │  + CustomField           │   │
+│   │  # IsLowStock()  │          │                          │   │
+│   │  # CanDeduct()   │          │  # IsLowStock() override │   │
+│   │  # Deduct()      │          │  # CanDeduct() override  │   │
+│   └──────────────────┘          └──────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Base Entity (Provided by Module)
+
+```csharp
+// 📦 In NuGet Package
+namespace BenSumaidea.Modules.Inventory.Domain;
+
+public abstract class StockItemBase<TKey> where TKey : struct
+{
+    public TKey Id { get; set; }
+    public TKey ProductId { get; set; }
+    public int Quantity { get; protected set; }
+    public int ReorderLevel { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    
+    // ══════════════════════════════════════════════════════════
+    // Virtual methods - Override as needed!
+    // ══════════════════════════════════════════════════════════
+    
+    public virtual bool IsLowStock() => Quantity <= ReorderLevel;
+    
+    public virtual bool CanDeduct(int amount) => Quantity >= amount;
+    
+    public virtual void Deduct(int amount)
+    {
+        if (!CanDeduct(amount))
+            throw new InsufficientStockException(Id, Quantity, amount);
+        
+        Quantity -= amount;
+        UpdatedAt = DateTime.UtcNow;
+    }
+    
+    // Hook methods for extensibility
+    protected virtual void OnQuantityChanged(int oldValue, int newValue) { }
+    protected virtual void OnLowStock() { }
+}
+```
+
+### Your Custom Entity
+
+```csharp
+// 👤 In Your Project
+namespace MyCompany.Domain.Entities;
+
+public class MyStockItem : StockItemBase<Guid>
+{
+    // ══════════════════════════════════════════════════════════
+    // 1️⃣ Add your own properties
+    // ══════════════════════════════════════════════════════════
+    public string? WarehouseLocation { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public string? BatchNumber { get; set; }
+    public decimal UnitCost { get; set; }
+    
+    // Navigation properties
+    public Guid WarehouseId { get; set; }
+    public Warehouse Warehouse { get; set; } = null!;
+    
+    // ══════════════════════════════════════════════════════════
+    // 2️⃣ Override methods with your business logic
+    // ══════════════════════════════════════════════════════════
+    
+    public override bool CanDeduct(int amount)
+    {
+        // Don't sell expired products!
+        if (ExpiryDate.HasValue && ExpiryDate < DateTime.Today)
+            return false;
+        
+        return base.CanDeduct(amount);
+    }
+    
+    public override bool IsLowStock()
+    {
+        // Products expiring soon = low stock
+        if (ExpiryDate.HasValue && ExpiryDate < DateTime.Today.AddDays(30))
+            return true;
+        
+        return base.IsLowStock();
+    }
+    
+    // ══════════════════════════════════════════════════════════
+    // 3️⃣ React to events
+    // ══════════════════════════════════════════════════════════
+    
+    protected override void OnLowStock()
+    {
+        DomainEvents.Raise(new LowStockAlert(this));
+    }
+}
+```
+
+### Registration
+
+```csharp
+// Use your custom entity
+services.AddInventoryModule<AppDbContext, MyStockItem>();
+
+// The module's services now work with YOUR entity!
+IStockService<MyStockItem> stockService;
+```
+
+---
+
 ## 🏗️ Architecture
 
 ### Design Principles
@@ -425,11 +722,19 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ### Q2 2026
 - [x] Design core architecture
+- [x] Schema flexibility design *(thanks to Mustafa Al-Qahoum)*
+- [x] Entity inheritance pattern *(thanks to Omar Al-Amoudi)*
+- [x] Multi-tenancy strategies design
 - [ ] Inventory Module MVP
 - [ ] Initial documentation
 - [ ] AI Skills
 
 ### Q3 2026
+- [ ] **Core Infrastructure**
+  - [ ] Schema configuration layer
+  - [ ] Entity base classes
+  - [ ] Multi-tenancy middleware
+- [ ] **Inventory Module v1.0**
 - [ ] Customers Module
 - [ ] Notifications Module
 - [ ] Blazor UI Components
@@ -437,11 +742,14 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ### Q4 2026
 - [ ] Auth Module
 - [ ] Audit Module
-- [ ] MultiTenancy Support
+- [ ] Multi-tenancy Module (standalone)
+- [ ] Column aliasing support
+- [ ] Migration helpers
 
 ### 2027
 - [ ] More modules based on community requests
 - [ ] Integration with other frameworks
+- [ ] Blazor Admin UI templates
 
 ---
 
@@ -462,6 +770,15 @@ This project is licensed under the [MIT License](LICENSE).
 ## ⭐ Acknowledgments
 
 Thanks to all contributors who make this project better!
+
+### 🌟 Special Thanks
+
+| Contributor | Contribution |
+|-------------|-------------|
+| **Mustafa Al-Qahoum** | Schema flexibility & Multi-tenancy strategies design |
+| **Omar Al-Amoudi** | Entity inheritance pattern suggestion |
+
+> Your feedback shapes this project! 💪
 
 ---
 
